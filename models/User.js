@@ -17,6 +17,32 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  // --- Nuevos campos para el Perfil Personal ---
+  titulo: {
+    type: String,
+    default: ''
+  },
+  facultad: {
+    type: String,
+    default: ''
+  },
+  carrera: {
+    type: String,
+    default: ''
+  },
+  bio: {
+    type: String,
+    default: ''
+  },
+  fotoUrl: {
+    type: String,
+    default: ''
+  },
+  habilidades: {
+    type: [String],
+    default: []
+  },
+  // ---------------------------------------------
   areas: {
     type: [String],
     default: []
