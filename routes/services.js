@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const Service = require('../models/Service');
 
 // @route   POST /api/services
-// @desc    Crear una nueva oferta de servicio de estudiante
+// @desc    Crear una nueva oferta de servicio de estudiante (Va a estado 'pendiente' a menos que sea Admin)
 router.post('/', async (req, res) => {
   try {
     const {
@@ -14,12 +14,15 @@ router.post('/', async (req, res) => {
       semestre,
       etiquetas,
       fotoUrl,
-      autorId
+      autorId,
+      userRol
     } = req.body;
 
     if (!nombreEstudiante || !areaEspecialidad || !descripcion) {
       return res.status(400).json({ msg: 'Por favor completa el nombre, especialidad y descripción del servicio.' });
     }
+
+    const estadoInicial = (userRol === 'admin') ? 'aprobado' : 'pendiente';
 
     const serviceFields = {
       nombreEstudiante,
@@ -27,7 +30,8 @@ router.post('/', async (req, res) => {
       descripcion,
       semestre: semestre || '1er Semestre',
       etiquetas: Array.isArray(etiquetas) ? etiquetas : [],
-      fotoUrl: fotoUrl || ''
+      fotoUrl: fotoUrl || '',
+      estado: estadoInicial
     };
 
     if (autorId && mongoose.Types.ObjectId.isValid(autorId)) {
@@ -45,11 +49,19 @@ router.post('/', async (req, res) => {
 });
 
 // @route   GET /api/services
-// @desc    Obtener lista de servicios disponibles
+// @desc    Obtener lista de servicios disponibles (Por defecto devuelve únicamente los 'aprobados')
 router.get('/', async (req, res) => {
   try {
-    const { etiqueta, busqueda } = req.query;
+    const { etiqueta, busqueda, estado } = req.query;
     let query = { disponible: true };
+
+    if (estado === 'pendiente') {
+      query.estado = 'pendiente';
+    } else if (estado === 'rechazado') {
+      query.estado = 'rechazado';
+    } else if (estado !== 'todos') {
+      query.estado = 'aprobado';
+    }
 
     if (etiqueta) {
       query.etiquetas = { $in: [etiqueta] };
@@ -68,6 +80,30 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('Error detallado al obtener servicios:', err);
     return res.status(500).json({ msg: err.message || 'Error interno en el servidor al obtener servicios' });
+  }
+});
+
+// @route   PUT /api/services/:id/estado
+// @desc    Actualizar el estado de revisión de un servicio (Aprobar / Rechazar)
+router.put('/:id/estado', async (req, res) => {
+  try {
+    const { estado } = req.body;
+    if (!['aprobado', 'rechazado', 'pendiente'].includes(estado)) {
+      return res.status(400).json({ msg: 'Estado de revisión no válido' });
+    }
+
+    const service = await Service.findById(req.params.id);
+    if (!service) {
+      return res.status(404).json({ msg: 'Servicio no encontrado' });
+    }
+
+    service.estado = estado;
+    await service.save();
+
+    return res.json({ msg: `Servicio marcado como ${estado} con éxito`, service });
+  } catch (err) {
+    console.error('Error al actualizar estado del servicio:', err);
+    return res.status(500).json({ msg: 'Error interno en el servidor al actualizar estado' });
   }
 });
 

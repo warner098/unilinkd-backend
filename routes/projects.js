@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const Project = require('../models/Project');
 
 // @route   POST /api/projects
-// @desc    Crear un nuevo proyecto / convocatoria
+// @desc    Crear un nuevo proyecto / convocatoria (Va a estado 'pendiente' a menos que sea Admin)
 router.post('/', async (req, res) => {
   try {
     const {
@@ -17,12 +17,16 @@ router.post('/', async (req, res) => {
       categoriaPrincipal,
       etiquetas,
       autor,
-      autorId
+      autorId,
+      userRol
     } = req.body;
 
     if (!titulo || !descripcion || !categoriaPrincipal) {
       return res.status(400).json({ msg: 'Por favor completa el título, descripción y categoría principal.' });
     }
+
+    // Si es admin, se aprueba automáticamente; si no, queda 'pendiente' de revisión
+    const estadoInicial = (userRol === 'admin') ? 'aprobado' : 'pendiente';
 
     const projectFields = {
       titulo,
@@ -33,7 +37,8 @@ router.post('/', async (req, res) => {
       colaboradoresBuscados: colaboradoresBuscados || 'Colaboradores',
       categoriaPrincipal,
       etiquetas: Array.isArray(etiquetas) ? etiquetas : [],
-      autor: autor || 'Estudiante UniLinkd'
+      autor: autor || 'Estudiante UniLinkd',
+      estado: estadoInicial
     };
 
     if (autorId && mongoose.Types.ObjectId.isValid(autorId)) {
@@ -51,11 +56,20 @@ router.post('/', async (req, res) => {
 });
 
 // @route   GET /api/projects
-// @desc    Obtener lista de proyectos (admite filtro ?categoria=... o ?etiqueta=...)
+// @desc    Obtener lista de proyectos (Por defecto devuelve únicamente los 'aprobados')
 router.get('/', async (req, res) => {
   try {
-    const { categoria, etiqueta } = req.query;
+    const { categoria, etiqueta, estado } = req.query;
     let query = {};
+
+    // Si no se especifica estado o se solicita 'aprobado', filtrar por 'aprobado'
+    if (estado === 'pendiente') {
+      query.estado = 'pendiente';
+    } else if (estado === 'rechazado') {
+      query.estado = 'rechazado';
+    } else if (estado !== 'todos') {
+      query.estado = 'aprobado';
+    }
 
     if (categoria && categoria !== 'Todas') {
       query.categoriaPrincipal = categoria;
@@ -70,6 +84,30 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('Error detallado al obtener proyectos:', err);
     return res.status(500).json({ msg: err.message || 'Error interno en el servidor al obtener proyectos' });
+  }
+});
+
+// @route   PUT /api/projects/:id/estado
+// @desc    Actualizar el estado de revisión de un proyecto (Aprobar / Rechazar)
+router.put('/:id/estado', async (req, res) => {
+  try {
+    const { estado } = req.body;
+    if (!['aprobado', 'rechazado', 'pendiente'].includes(estado)) {
+      return res.status(400).json({ msg: 'Estado de revisión no válido' });
+    }
+
+    const project = await Project.findById(req.params.id);
+    if (!project) {
+      return res.status(404).json({ msg: 'Proyecto no encontrado' });
+    }
+
+    project.estado = estado;
+    await project.save();
+
+    return res.json({ msg: `Proyecto marcado como ${estado} con éxito`, project });
+  } catch (err) {
+    console.error('Error al actualizar estado del proyecto:', err);
+    return res.status(500).json({ msg: 'Error interno en el servidor al actualizar estado' });
   }
 });
 
