@@ -10,15 +10,19 @@ router.post('/register', async (req, res) => {
   const { nombre, correo, password, areas, semestre } = req.body;
 
   try {
-    let user = await User.findOne({ correo });
+    let user = await User.findOne({ correo: correo.toLowerCase() });
     if (user) {
       return res.status(400).json({ msg: 'El correo ya está registrado' });
     }
 
+    // Asignar rol de admin automáticamente si es admin@unilinkd.com
+    const rol = (correo.toLowerCase() === 'admin@unilinkd.com') ? 'admin' : 'estudiante';
+
     user = new User({
       nombre,
-      correo,
+      correo: correo.toLowerCase(),
       password,
+      rol,
       areas,
       semestre
     });
@@ -30,7 +34,8 @@ router.post('/register', async (req, res) => {
 
     const payload = {
       user: {
-        id: user.id
+        id: user.id,
+        rol: user.rol
       }
     };
 
@@ -46,6 +51,7 @@ router.post('/register', async (req, res) => {
             id: user.id,
             nombre: user.nombre,
             correo: user.correo,
+            rol: user.rol,
             titulo: user.titulo,
             facultad: user.facultad,
             carrera: user.carrera,
@@ -71,7 +77,7 @@ router.post('/login', async (req, res) => {
   const { correo, password } = req.body;
 
   try {
-    let user = await User.findOne({ correo });
+    let user = await User.findOne({ correo: correo.toLowerCase() });
     if (!user) {
       return res.status(400).json({ msg: 'Credenciales inválidas' });
     }
@@ -81,9 +87,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ msg: 'Credenciales inválidas' });
     }
 
+    // Asegurar que admin@unilinkd.com tenga rol de admin si no lo tenía previamente
+    if (user.correo === 'admin@unilinkd.com' && user.rol !== 'admin') {
+      user.rol = 'admin';
+      await user.save();
+    }
+
     const payload = {
       user: {
-        id: user.id
+        id: user.id,
+        rol: user.rol
       }
     };
 
@@ -99,6 +112,7 @@ router.post('/login', async (req, res) => {
             id: user.id,
             nombre: user.nombre,
             correo: user.correo,
+            rol: user.rol,
             titulo: user.titulo,
             facultad: user.facultad,
             carrera: user.carrera,
@@ -124,14 +138,12 @@ router.put('/perfil', async (req, res) => {
   const { id, correo, nombre, titulo, facultad, carrera, semestre, bio, fotoUrl, areas, habilidades } = req.body;
 
   try {
-    // Buscar por ID o por Correo
-    let user = await User.findOne({ $or: [{ _id: id }, { correo: correo }] });
+    let user = await User.findOne({ $or: [{ _id: id }, { correo: correo ? correo.toLowerCase() : '' }] });
 
     if (!user) {
       return res.status(404).json({ msg: 'Usuario no encontrado' });
     }
 
-    // Actualizar datos
     if (nombre) user.nombre = nombre;
     if (titulo !== undefined) user.titulo = titulo;
     if (facultad !== undefined) user.facultad = facultad;
@@ -150,6 +162,7 @@ router.put('/perfil', async (req, res) => {
         id: user.id,
         nombre: user.nombre,
         correo: user.correo,
+        rol: user.rol,
         titulo: user.titulo,
         facultad: user.facultad,
         carrera: user.carrera,

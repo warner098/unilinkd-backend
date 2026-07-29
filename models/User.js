@@ -17,7 +17,12 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  // --- Nuevos campos para el Perfil Personal ---
+  rol: {
+    type: String,
+    enum: ['estudiante', 'admin'],
+    default: 'estudiante'
+  },
+  // --- Campos para el Perfil Personal ---
   titulo: {
     type: String,
     default: ''
