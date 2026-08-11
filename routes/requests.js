@@ -45,20 +45,24 @@ router.post('/', async (req, res) => {
     await newRequest.save();
 
     // Notificar al dueño del servicio en tiempo real
-    const newNotification = new Notification({
-      usuarioId: autorServicioId,
-      usuarioNombre: autorServicioNombre,
-      titulo: '📩 Nueva petición de ayuda recibida',
-      mensaje: `${solicitanteNombre} te ha enviado una propuesta de ayuda para tu servicio "${servicioTitulo}": "${tituloPeticion}".`,
-      tipo: 'peticion_recibida',
-      requestId: newRequest._id
-    });
-    await newNotification.save();
+    try {
+      const newNotification = new Notification({
+        usuarioId: autorServicioId,
+        usuarioNombre: autorServicioNombre || 'Estudiante',
+        titulo: '📩 Nueva petición de ayuda recibida',
+        mensaje: `${solicitanteNombre || 'Un estudiante'} te ha enviado una propuesta de ayuda para tu servicio "${servicioTitulo}": "${tituloPeticion}".`,
+        tipo: 'peticion_recibida',
+        requestId: newRequest._id.toString()
+      });
+      await newNotification.save();
+    } catch (notifErr) {
+      console.error('Error al guardar notificación de petición:', notifErr.message);
+    }
 
     res.status(201).json(newRequest);
   } catch (err) {
     console.error('Error al crear petición de ayuda:', err);
-    res.status(500).json({ msg: 'Error en el servidor al enviar la petición de ayuda' });
+    res.status(500).json({ msg: 'Error en el servidor al enviar la petición de ayuda: ' + err.message });
   }
 });
 
@@ -103,19 +107,23 @@ router.put('/:id/status', async (req, res) => {
     await helpReq.save();
 
     // Notificar al solicitante
-    const notifMsg = estado === 'aceptado'
-      ? `🎉 Tu propuesta "${helpReq.tituloPeticion}" para "${helpReq.servicioTitulo}" fue ACEPTADA por ${helpReq.autorServicioNombre}. ¡El chat en vivo está listo!`
-      : `⚠️ Tu propuesta "${helpReq.tituloPeticion}" fue rechazada. Motivo: ${motivoRechazo || 'Información no adecuada'}`;
+    try {
+      const notifMsg = estado === 'aceptado'
+        ? `🎉 Tu propuesta "${helpReq.tituloPeticion}" para "${helpReq.servicioTitulo}" fue ACEPTADA por ${helpReq.autorServicioNombre}. ¡El chat en vivo está listo!`
+        : `⚠️ Tu propuesta "${helpReq.tituloPeticion}" fue rechazada. Motivo: ${motivoRechazo || 'Información no adecuada'}`;
 
-    const newNotification = new Notification({
-      usuarioId: helpReq.solicitanteId,
-      usuarioNombre: helpReq.solicitanteNombre,
-      titulo: estado === 'aceptado' ? '✅ Petición Aceptada - Chat Activo' : '❌ Petición Rechazada',
-      mensaje: notifMsg,
-      tipo: estado === 'aceptado' ? 'peticion_aceptada' : 'peticion_rechazada',
-      requestId: helpReq._id
-    });
-    await newNotification.save();
+      const newNotification = new Notification({
+        usuarioId: helpReq.solicitanteId,
+        usuarioNombre: helpReq.solicitanteNombre,
+        titulo: estado === 'aceptado' ? '✅ Petición Aceptada - Chat Activo' : '❌ Petición Rechazada',
+        mensaje: notifMsg,
+        tipo: estado === 'aceptado' ? 'peticion_aceptada' : 'peticion_rechazada',
+        requestId: helpReq._id.toString()
+      });
+      await newNotification.save();
+    } catch (notifErr) {
+      console.error('Error al enviar notificación al solicitante:', notifErr.message);
+    }
 
     res.json(helpReq);
   } catch (err) {

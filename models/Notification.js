@@ -5,6 +5,10 @@ const NotificationSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  usuarioNombre: {
+    type: String,
+    default: ''
+  },
   titulo: {
     type: String,
     required: true
@@ -15,8 +19,21 @@ const NotificationSchema = new mongoose.Schema({
   },
   tipo: {
     type: String,
-    enum: ['aprobado', 'rechazado', 'info'],
+    enum: [
+      'aprobado',
+      'rechazado',
+      'info',
+      'peticion_recibida',
+      'peticion_aceptada',
+      'peticion_rechazada',
+      'publicacion_aprobada',
+      'publicacion_rechazada'
+    ],
     default: 'info'
+  },
+  requestId: {
+    type: String,
+    default: ''
   },
   motivo: {
     type: String,
