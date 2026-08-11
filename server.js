@@ -107,6 +107,7 @@ app.use('/api/projects', require('./routes/projects'));
 app.use('/api/services', require('./routes/services'));
 app.use('/api/tags', require('./routes/tags'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/requests', require('./routes/requests'));
 
 // Ruta de prueba
 app.get('/', (req, res) => {
