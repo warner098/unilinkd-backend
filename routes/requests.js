@@ -82,13 +82,32 @@ router.get('/user/:userId', async (req, res) => {
     };
 
     if (userNombre && userNombre.trim()) {
-      const regex = new RegExp(`^${userNombre.trim()}$`, 'i');
+      const cleanName = userNombre.trim();
+      const regex = new RegExp(`^${cleanName}$`, 'i');
       query.$or.push({ autorServicioNombre: regex });
       query.$or.push({ solicitanteNombre: regex });
     }
 
-    const requests = await HelpRequest.find(query).sort({ updatedAt: -1 });
-    res.json(requests);
+    const allRequests = await HelpRequest.find(query).sort({ updatedAt: -1 });
+
+    // Filtrar solicitudes eliminadas por cada rol individualmente
+    const cleanUserId = userId.toString();
+    const cleanUserName = userNombre ? userNombre.trim().toLowerCase() : '';
+
+    const filtered = allRequests.filter(r => {
+      const isAutor = (r.autorServicioId && r.autorServicioId.toString() === cleanUserId) ||
+                      (cleanUserName && r.autorServicioNombre && r.autorServicioNombre.trim().toLowerCase() === cleanUserName);
+
+      const isSolicitante = (r.solicitanteId && r.solicitanteId.toString() === cleanUserId) ||
+                            (cleanUserName && r.solicitanteNombre && r.solicitanteNombre.trim().toLowerCase() === cleanUserName);
+
+      if (isAutor && r.eliminadoPorAutor) return false;
+      if (isSolicitante && r.eliminadoPorSolicitante) return false;
+
+      return true;
+    });
+
+    res.json(filtered);
   } catch (err) {
     console.error('Error al consultar peticiones:', err);
     res.status(500).json({ msg: 'Error al consultar peticiones de ayuda' });
@@ -109,7 +128,6 @@ router.put('/:id/status', async (req, res) => {
     const isOwnerByName = userNombre && helpReq.autorServicioNombre && helpReq.autorServicioNombre.trim().toLowerCase() === userNombre.trim().toLowerCase();
 
     if (!isOwnerById && !isOwnerByName && userId !== 'admin') {
-      // También permitir si el usuario es el solicitante o autor
       const isSolicitant = helpReq.solicitanteId && userId && helpReq.solicitanteId.toString() === userId.toString();
       if (!isSolicitant) {
         return res.status(403).json({ msg: 'No tienes autorización para cambiar el estado de esta petición' });
@@ -176,8 +194,11 @@ router.post('/:id/messages', async (req, res) => {
 
     // Notificar al destinatario del nuevo mensaje
     try {
-      const destinatarioId = (emisorId === helpReq.solicitanteId) ? helpReq.autorServicioId : helpReq.solicitanteId;
-      const destinatarioNombre = (emisorId === helpReq.solicitanteId) ? helpReq.autorServicioNombre : helpReq.solicitanteNombre;
+      const isEmisorAutor = (helpReq.autorServicioId && emisorId && helpReq.autorServicioId.toString() === emisorId.toString()) ||
+                            (helpReq.autorServicioNombre && emisorNombre && helpReq.autorServicioNombre.trim().toLowerCase() === emisorNombre.trim().toLowerCase());
+
+      const destinatarioId = isEmisorAutor ? helpReq.solicitanteId : helpReq.autorServicioId;
+      const destinatarioNombre = isEmisorAutor ? helpReq.solicitanteNombre : helpReq.autorServicioNombre;
 
       const newNotif = new Notification({
         usuarioId: destinatarioId,
@@ -196,6 +217,41 @@ router.post('/:id/messages', async (req, res) => {
   } catch (err) {
     console.error('Error al enviar mensaje:', err);
     res.status(500).json({ msg: 'Error en el servidor al enviar el mensaje' });
+  }
+});
+
+// 5. ELIMINAR / OCULTAR UN CHAT PARA UN USUARIO
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, userNombre } = req.query;
+
+    const helpReq = await HelpRequest.findById(id);
+    if (!helpReq) return res.status(404).json({ msg: 'Petición no encontrada' });
+
+    const cleanUserId = userId ? userId.toString() : '';
+    const cleanUserName = userNombre ? userNombre.trim().toLowerCase() : '';
+
+    const isAutor = (helpReq.autorServicioId && helpReq.autorServicioId.toString() === cleanUserId) ||
+                    (cleanUserName && helpReq.autorServicioNombre && helpReq.autorServicioNombre.trim().toLowerCase() === cleanUserName);
+
+    const isSolicitante = (helpReq.solicitanteId && helpReq.solicitanteId.toString() === cleanUserId) ||
+                          (cleanUserName && helpReq.solicitanteNombre && helpReq.solicitanteNombre.trim().toLowerCase() === cleanUserName);
+
+    if (isAutor) helpReq.eliminadoPorAutor = true;
+    if (isSolicitante) helpReq.eliminadoPorSolicitante = true;
+
+    // Si ambos lo han eliminado, borrar definitivamente de MongoDB
+    if (helpReq.eliminadoPorAutor && helpReq.eliminadoPorSolicitante) {
+      await HelpRequest.findByIdAndDelete(id);
+      return res.json({ msg: 'Chat eliminado definitivamente de ambos usuarios' });
+    } else {
+      await helpReq.save();
+      return res.json({ msg: 'Chat eliminado de tu historial' });
+    }
+  } catch (err) {
+    console.error('Error al eliminar chat:', err);
+    res.status(500).json({ msg: 'Error al eliminar el chat' });
   }
 });
 

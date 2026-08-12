@@ -32,6 +32,9 @@ const helpRequestSchema = new mongoose.Schema({
   },
   motivoRechazo: { type: String, default: '' },
 
+  eliminadoPorAutor: { type: Boolean, default: false },
+  eliminadoPorSolicitante: { type: Boolean, default: false },
+
   mensajes: [messageSchema]
 }, { timestamps: true });
 
