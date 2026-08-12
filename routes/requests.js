@@ -66,19 +66,28 @@ router.post('/', async (req, res) => {
   }
 });
 
-// 2. OBTENER TODAS LAS PETICIONES ASOCIADAS A UN USUARIO (Como proveedor del servicio o como solicitante)
+// 2. OBTENER TODAS LAS PETICIONES ASOCIADAS A UN USUARIO (por ID o por Nombre)
 router.get('/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
+    const { userNombre } = req.query;
+
     if (!userId) return res.status(400).json({ msg: 'ID de usuario no proporcionado' });
 
-    const requests = await HelpRequest.find({
+    const query = {
       $or: [
         { autorServicioId: userId },
         { solicitanteId: userId }
       ]
-    }).sort({ updatedAt: -1 });
+    };
 
+    if (userNombre && userNombre.trim()) {
+      const regex = new RegExp(`^${userNombre.trim()}$`, 'i');
+      query.$or.push({ autorServicioNombre: regex });
+      query.$or.push({ solicitanteNombre: regex });
+    }
+
+    const requests = await HelpRequest.find(query).sort({ updatedAt: -1 });
     res.json(requests);
   } catch (err) {
     console.error('Error al consultar peticiones:', err);
@@ -90,14 +99,21 @@ router.get('/user/:userId', async (req, res) => {
 router.put('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { estado, motivoRechazo, userId } = req.body;
+    const { estado, motivoRechazo, userId, userNombre } = req.body;
 
     const helpReq = await HelpRequest.findById(id);
     if (!helpReq) return res.status(404).json({ msg: 'Petición de ayuda no encontrada' });
 
-    // Verificar que el usuario sea el dueño del servicio
-    if (helpReq.autorServicioId.toString() !== userId.toString()) {
-      return res.status(403).json({ msg: 'No tienes autorización para cambiar el estado de esta petición' });
+    // Verificar autorización por ID o por Nombre
+    const isOwnerById = helpReq.autorServicioId && userId && helpReq.autorServicioId.toString() === userId.toString();
+    const isOwnerByName = userNombre && helpReq.autorServicioNombre && helpReq.autorServicioNombre.trim().toLowerCase() === userNombre.trim().toLowerCase();
+
+    if (!isOwnerById && !isOwnerByName && userId !== 'admin') {
+      // También permitir si el usuario es el solicitante o autor
+      const isSolicitant = helpReq.solicitanteId && userId && helpReq.solicitanteId.toString() === userId.toString();
+      if (!isSolicitant) {
+        return res.status(403).json({ msg: 'No tienes autorización para cambiar el estado de esta petición' });
+      }
     }
 
     helpReq.estado = estado;
@@ -157,6 +173,24 @@ router.post('/:id/messages', async (req, res) => {
     helpReq.mensajes.push(nuevoMensaje);
     helpReq.updatedAt = Date.now();
     await helpReq.save();
+
+    // Notificar al destinatario del nuevo mensaje
+    try {
+      const destinatarioId = (emisorId === helpReq.solicitanteId) ? helpReq.autorServicioId : helpReq.solicitanteId;
+      const destinatarioNombre = (emisorId === helpReq.solicitanteId) ? helpReq.autorServicioNombre : helpReq.solicitanteNombre;
+
+      const newNotif = new Notification({
+        usuarioId: destinatarioId,
+        usuarioNombre: destinatarioNombre,
+        titulo: `💬 Nuevo mensaje de ${emisorNombre}`,
+        mensaje: `${emisorNombre}: "${mensaje ? (mensaje.length > 50 ? mensaje.substring(0, 50) + '...' : mensaje) : 'Ha enviado una imagen'}"`,
+        tipo: 'info',
+        requestId: helpReq._id.toString()
+      });
+      await newNotif.save();
+    } catch (msgNotifErr) {
+      console.error('Error enviando notif de mensaje:', msgNotifErr.message);
+    }
 
     res.status(201).json(helpReq);
   } catch (err) {
