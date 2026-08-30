@@ -15,8 +15,10 @@ router.get('/:usuarioId', async (req, res) => {
       ]
     };
 
-    if (autorNombre) {
-      query.$or.push({ usuarioId: autorNombre.trim().toLowerCase() });
+    if (autorNombre && autorNombre.trim()) {
+      const cleanName = autorNombre.trim();
+      query.$or.push({ usuarioId: cleanName.toLowerCase() });
+      query.$or.push({ usuarioNombre: new RegExp(`^${cleanName}$`, 'i') });
     }
 
     const notifications = await Notification.find(query).sort({ fechaCreacion: -1 });
@@ -27,9 +29,8 @@ router.get('/:usuarioId', async (req, res) => {
   }
 });
 
-// @route   PUT /api/notifications/:id/leido
-// @desc    Marcar una notificación como leída
-router.put('/:id/leido', async (req, res) => {
+// Handler común para marcar notificación como leída
+const markAsReadHandler = async (req, res) => {
   try {
     const notification = await Notification.findById(req.params.id);
     if (!notification) {
@@ -44,7 +45,11 @@ router.put('/:id/leido', async (req, res) => {
     console.error('Error al marcar notificación:', err);
     return res.status(500).json({ msg: 'Error interno al actualizar notificación' });
   }
-});
+};
+
+// @route   PUT /api/notifications/:id/read & /leido
+router.put('/:id/leido', markAsReadHandler);
+router.put('/:id/read', markAsReadHandler);
 
 // @route   DELETE /api/notifications/:id
 // @desc    Eliminar una notificación
