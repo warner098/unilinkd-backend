@@ -38,10 +38,20 @@ router.get('/usuario/:identifier', async (req, res) => {
       const escapedName = decodedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       user = await User.findOne({
         $or: [
-          { nombre: new RegExp(`^${escapedName}$`, 'i') },
+          { nombre: new RegExp(escapedName, 'i') },
           { correo: decodedName.toLowerCase() }
         ]
       });
+    }
+
+    // Búsqueda flexible por primera palabra del nombre si falla coincidencia completa
+    if (!user) {
+      const decodedName = decodeURIComponent(identifier).trim();
+      const firstName = decodedName.split(' ')[0];
+      if (firstName && firstName.length > 2) {
+        const escapedFirst = firstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        user = await User.findOne({ nombre: new RegExp(escapedFirst, 'i') });
+      }
     }
 
     if (!user) {
@@ -52,6 +62,51 @@ router.get('/usuario/:identifier', async (req, res) => {
   } catch (err) {
     console.error('Error al obtener usuario por identificador:', err);
     res.status(500).send('Error al obtener perfil del usuario');
+  }
+});
+
+// @route   POST /api/auth/google-sync
+// @desc    Sincronizar o crear usuario de Google en MongoDB
+router.post('/google-sync', async (req, res) => {
+  const { nombre, correo, fotoUrl, semestre, areas, titulo, facultad, carrera } = req.body;
+
+  try {
+    if (!correo) {
+      return res.status(400).json({ msg: 'El correo electrónico es requerido' });
+    }
+
+    let user = await User.findOne({ correo: correo.toLowerCase() });
+
+    if (!user) {
+      // Registrar automáticamente en MongoDB al entrar por primera vez con Google
+      const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(randomPassword, salt);
+
+      user = new User({
+        nombre: nombre || 'Carlos Jaren Pincay Parrales',
+        correo: correo.toLowerCase(),
+        password: hashedPassword,
+        rol: (correo.toLowerCase() === 'admin@unilinkd.com') ? 'admin' : 'estudiante',
+        fotoUrl: fotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+        semestre: semestre || '5to Semestre',
+        areas: areas || ['Tecnologías de la Información / Software'],
+        titulo: titulo || 'Estudiante de Desarrollo Web / BD',
+        facultad: facultad || 'Facultad de Ciencias Informáticas',
+        carrera: carrera || 'Tecnologías de la Información',
+        portafolio: []
+      });
+
+      await user.save();
+    }
+
+    res.json({
+      msg: 'Usuario de Google sincronizado con éxito',
+      user: formatUserResponse(user)
+    });
+  } catch (err) {
+    console.error('Error al sincronizar usuario de Google:', err);
+    res.status(500).send('Error en el servidor al sincronizar usuario');
   }
 });
 
