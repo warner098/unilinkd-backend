@@ -12,14 +12,14 @@ const formatUserResponse = (user) => ({
   nombre: user.nombre,
   correo: user.correo,
   rol: user.rol,
-  titulo: user.titulo,
-  facultad: user.facultad,
-  carrera: user.carrera,
-  semestre: user.semestre,
-  bio: user.bio,
-  fotoUrl: user.fotoUrl,
-  areas: user.areas,
-  habilidades: user.habilidades,
+  titulo: user.titulo || '',
+  facultad: user.facultad || '',
+  carrera: user.carrera || '',
+  semestre: user.semestre || '',
+  bio: user.bio || '',
+  fotoUrl: user.fotoUrl || '',
+  areas: user.areas || [],
+  habilidades: user.habilidades || [],
   portafolio: user.portafolio || []
 });
 
@@ -56,26 +56,22 @@ router.get('/usuario/:identifier', async (req, res) => {
       user = await User.findById(decoded);
     }
 
-    // 2. Buscar por googleId, correo o coincidencia de nombre
+    // 2. Coincidencia EXACTA por googleId, correo o nombre (insensible a mayúsculas)
     if (!user) {
       const escaped = decoded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       user = await User.findOne({
         $or: [
           { googleId: decoded },
           { correo: decoded.toLowerCase() },
-          { nombre: new RegExp(`^${escaped}$`, 'i') },
-          { nombre: new RegExp(escaped, 'i') }
+          { nombre: new RegExp(`^${escaped}$`, 'i') }
         ]
       });
     }
 
-    // 3. Búsqueda por la primera palabra del nombre si no es un ID de google
-    if (!user && !decoded.toLowerCase().startsWith('google')) {
-      const firstName = decoded.split(' ')[0];
-      if (firstName && firstName.length > 2) {
-        const escapedFirst = firstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        user = await User.findOne({ nombre: new RegExp(escapedFirst, 'i') });
-      }
+    // 3. Coincidencia parcial estricta (debe contener el string completo buscado)
+    if (!user && decoded.length > 3) {
+      const escaped = decoded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      user = await User.findOne({ nombre: new RegExp(escaped, 'i') });
     }
 
     if (!user) {
@@ -132,7 +128,6 @@ router.post('/google-sync', async (req, res) => {
 
       await user.save();
     } else {
-      // Si el usuario ya existe pero no tenía asociado googleId, vincularlo
       if (targetGoogleId && !user.googleId) {
         user.googleId = targetGoogleId;
         await user.save();
@@ -160,7 +155,6 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ msg: 'El correo ya está registrado' });
     }
 
-    // Asignar rol de admin automáticamente si es admin@unilinkd.com
     const rol = (correo.toLowerCase() === 'admin@unilinkd.com') ? 'admin' : 'estudiante';
 
     user = new User({
@@ -220,7 +214,6 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ msg: 'Credenciales inválidas' });
     }
 
-    // Asegurar que admin@unilinkd.com tenga rol de admin si no lo tenía previamente
     if (user.correo === 'admin@unilinkd.com' && user.rol !== 'admin') {
       user.rol = 'admin';
       await user.save();
@@ -253,15 +246,35 @@ router.post('/login', async (req, res) => {
 });
 
 // @route   PUT /api/auth/perfil
-// @desc    Actualizar perfil de usuario en la Base de Datos
+// @desc    Actualizar o crear perfil de usuario en la Base de Datos
 router.put('/perfil', async (req, res) => {
   const { id, correo, nombre, titulo, facultad, carrera, semestre, bio, fotoUrl, areas, habilidades } = req.body;
 
   try {
     let user = await findUserByIdOrEmail(id, correo);
 
+    if (!user && nombre) {
+      const escaped = nombre.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      user = await User.findOne({ nombre: new RegExp(`^${escaped}$`, 'i') });
+    }
+
+    // Auto-crear en MongoDB si el usuario no existía aún en la BD
     if (!user) {
-      return res.status(404).json({ msg: 'Usuario no encontrado' });
+      const userEmail = (correo || `user_${Date.now()}@unilinkd.com`).toLowerCase();
+      const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(randomPassword, salt);
+
+      user = new User({
+        googleId: (id && id.toString().includes('google')) ? id.toString() : '',
+        nombre: nombre || 'Estudiante UniLinkd',
+        correo: userEmail,
+        password: hashedPassword,
+        rol: (userEmail === 'admin@unilinkd.com') ? 'admin' : 'estudiante',
+        semestre: semestre || '1er Semestre',
+        areas: areas || ['Tecnologías de la Información / Software'],
+        portafolio: []
+      });
     }
 
     if (nombre) user.nombre = nombre;
@@ -281,7 +294,7 @@ router.put('/perfil', async (req, res) => {
       user: formatUserResponse(user)
     });
   } catch (err) {
-    console.error(err.message);
+    console.error('Error en PUT /api/auth/perfil:', err);
     res.status(500).send('Error al actualizar el perfil en el servidor');
   }
 });
