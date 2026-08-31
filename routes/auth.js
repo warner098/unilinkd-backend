@@ -8,6 +8,7 @@ const User = require('../models/User');
 // Helper para formatear objeto de usuario devuelto al cliente
 const formatUserResponse = (user) => ({
   id: user.id || user._id,
+  googleId: user.googleId || '',
   nombre: user.nombre,
   correo: user.correo,
   rol: user.rol,
@@ -22,7 +23,7 @@ const formatUserResponse = (user) => ({
   portafolio: user.portafolio || []
 });
 
-// Helper seguro para buscar usuarios por ID o Correo sin errores de CastError en Mongoose
+// Helper seguro para buscar usuarios por ID, googleId o Correo sin errores de CastError en Mongoose
 const findUserByIdOrEmail = async (id, correo) => {
   let user = null;
 
@@ -34,20 +35,15 @@ const findUserByIdOrEmail = async (id, correo) => {
     user = await User.findOne({ correo: correo.toLowerCase() });
   }
 
-  if (!user && id && id.toString().includes('google')) {
-    user = await User.findOne({
-      $or: [
-        { correo: 'pincay-carlos7490@unesum.edu.ec' },
-        { nombre: /Carlos Jaren/i }
-      ]
-    });
+  if (!user && id) {
+    user = await User.findOne({ googleId: id.toString() });
   }
 
   return user;
 };
 
 // @route   GET /api/auth/usuario/:identifier
-// @desc    Obtener el perfil público de un usuario por su ID, Nombre o Correo
+// @desc    Obtener el perfil público de un usuario por su ID, googleId, Nombre o Correo
 router.get('/usuario/:identifier', async (req, res) => {
   try {
     const { identifier } = req.params;
@@ -55,33 +51,25 @@ router.get('/usuario/:identifier', async (req, res) => {
 
     const decoded = decodeURIComponent(identifier).trim();
 
-    // 1. Si es un ObjectId válido de Mongoose
+    // 1. Si es un ObjectId válido de Mongoose (24 caracteres hex)
     if (mongoose.Types.ObjectId.isValid(decoded) && decoded.length === 24) {
       user = await User.findById(decoded);
     }
 
-    // 2. Buscar por correo o por coincidencia de nombre completo
+    // 2. Buscar por googleId, correo o coincidencia de nombre
     if (!user) {
       const escaped = decoded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       user = await User.findOne({
         $or: [
-          { nombre: new RegExp(escaped, 'i') },
-          { correo: decoded.toLowerCase() }
+          { googleId: decoded },
+          { correo: decoded.toLowerCase() },
+          { nombre: new RegExp(`^${escaped}$`, 'i') },
+          { nombre: new RegExp(escaped, 'i') }
         ]
       });
     }
 
-    // 3. Fallback especial si el identifier es un string de Google (ej: google_user_1788210109343)
-    if (!user && (decoded.startsWith('google') || decoded.includes('1788210109343'))) {
-      user = await User.findOne({
-        $or: [
-          { correo: 'pincay-carlos7490@unesum.edu.ec' },
-          { nombre: /Carlos Jaren/i }
-        ]
-      });
-    }
-
-    // 4. Búsqueda por la primera palabra del nombre si no empieza por "google"
+    // 3. Búsqueda por la primera palabra del nombre si no es un ID de google
     if (!user && !decoded.toLowerCase().startsWith('google')) {
       const firstName = decoded.split(' ')[0];
       if (firstName && firstName.length > 2) {
@@ -102,35 +90,53 @@ router.get('/usuario/:identifier', async (req, res) => {
 });
 
 // @route   POST /api/auth/google-sync
-// @desc    Sincronizar o crear usuario de Google en MongoDB
+// @desc    Sincronizar o crear usuario de Google de forma única en MongoDB
 router.post('/google-sync', async (req, res) => {
-  const { nombre, correo, fotoUrl, semestre, areas, titulo, facultad, carrera } = req.body;
+  const { googleId, id, nombre, correo, fotoUrl, semestre, areas, titulo, facultad, carrera } = req.body;
 
   try {
-    const userEmail = (correo || 'pincay-carlos7490@unesum.edu.ec').toLowerCase();
-    let user = await User.findOne({ correo: userEmail });
+    if (!correo) {
+      return res.status(400).json({ msg: 'El correo electrónico es requerido' });
+    }
+
+    const targetGoogleId = googleId || id || '';
+    const userEmail = correo.toLowerCase();
+
+    let user = await User.findOne({
+      $or: [
+        { correo: userEmail },
+        ...(targetGoogleId ? [{ googleId: targetGoogleId }] : [])
+      ]
+    });
 
     if (!user) {
-      // Registrar automáticamente en MongoDB al entrar por primera vez con Google
+      // Registrar nuevo usuario de Google en MongoDB
       const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(randomPassword, salt);
 
       user = new User({
-        nombre: nombre || 'Carlos Jaren Pincay Parrales',
+        googleId: targetGoogleId,
+        nombre: nombre || 'Estudiante Google',
         correo: userEmail,
         password: hashedPassword,
         rol: (userEmail === 'admin@unilinkd.com') ? 'admin' : 'estudiante',
         fotoUrl: fotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
         semestre: semestre || '5to Semestre',
         areas: areas || ['Tecnologías de la Información / Software'],
-        titulo: titulo || 'Estudiante de Desarrollo Web / BD',
+        titulo: titulo || 'Estudiante Universitario',
         facultad: facultad || 'Facultad de Ciencias Informáticas',
         carrera: carrera || 'Tecnologías de la Información',
         portafolio: []
       });
 
       await user.save();
+    } else {
+      // Si el usuario ya existe pero no tenía asociado googleId, vincularlo
+      if (targetGoogleId && !user.googleId) {
+        user.googleId = targetGoogleId;
+        await user.save();
+      }
     }
 
     res.json({

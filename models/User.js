@@ -41,6 +41,10 @@ const PortfolioProjectSchema = new mongoose.Schema({
 });
 
 const UserSchema = new mongoose.Schema({
+  googleId: {
+    type: String,
+    default: ''
+  },
   nombre: {
     type: String,
     required: true,
