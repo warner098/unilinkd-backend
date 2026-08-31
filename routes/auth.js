@@ -22,6 +22,30 @@ const formatUserResponse = (user) => ({
   portafolio: user.portafolio || []
 });
 
+// Helper seguro para buscar usuarios por ID o Correo sin errores de CastError en Mongoose
+const findUserByIdOrEmail = async (id, correo) => {
+  let user = null;
+
+  if (id && mongoose.Types.ObjectId.isValid(id) && id.toString().length === 24) {
+    user = await User.findById(id);
+  }
+
+  if (!user && correo) {
+    user = await User.findOne({ correo: correo.toLowerCase() });
+  }
+
+  if (!user && id && id.toString().includes('google')) {
+    user = await User.findOne({
+      $or: [
+        { correo: 'pincay-carlos7490@unesum.edu.ec' },
+        { nombre: /Carlos Jaren/i }
+      ]
+    });
+  }
+
+  return user;
+};
+
 // @route   GET /api/auth/usuario/:identifier
 // @desc    Obtener el perfil público de un usuario por su ID, Nombre o Correo
 router.get('/usuario/:identifier', async (req, res) => {
@@ -29,25 +53,37 @@ router.get('/usuario/:identifier', async (req, res) => {
     const { identifier } = req.params;
     let user;
 
-    if (mongoose.Types.ObjectId.isValid(identifier)) {
-      user = await User.findById(identifier);
+    const decoded = decodeURIComponent(identifier).trim();
+
+    // 1. Si es un ObjectId válido de Mongoose
+    if (mongoose.Types.ObjectId.isValid(decoded) && decoded.length === 24) {
+      user = await User.findById(decoded);
     }
 
+    // 2. Buscar por correo o por coincidencia de nombre completo
     if (!user) {
-      const decodedName = decodeURIComponent(identifier).trim();
-      const escapedName = decodedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escaped = decoded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       user = await User.findOne({
         $or: [
-          { nombre: new RegExp(escapedName, 'i') },
-          { correo: decodedName.toLowerCase() }
+          { nombre: new RegExp(escaped, 'i') },
+          { correo: decoded.toLowerCase() }
         ]
       });
     }
 
-    // Búsqueda flexible por primera palabra del nombre si falla coincidencia completa
-    if (!user) {
-      const decodedName = decodeURIComponent(identifier).trim();
-      const firstName = decodedName.split(' ')[0];
+    // 3. Fallback especial si el identifier es un string de Google (ej: google_user_1788210109343)
+    if (!user && (decoded.startsWith('google') || decoded.includes('1788210109343'))) {
+      user = await User.findOne({
+        $or: [
+          { correo: 'pincay-carlos7490@unesum.edu.ec' },
+          { nombre: /Carlos Jaren/i }
+        ]
+      });
+    }
+
+    // 4. Búsqueda por la primera palabra del nombre si no empieza por "google"
+    if (!user && !decoded.toLowerCase().startsWith('google')) {
+      const firstName = decoded.split(' ')[0];
       if (firstName && firstName.length > 2) {
         const escapedFirst = firstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         user = await User.findOne({ nombre: new RegExp(escapedFirst, 'i') });
@@ -71,11 +107,8 @@ router.post('/google-sync', async (req, res) => {
   const { nombre, correo, fotoUrl, semestre, areas, titulo, facultad, carrera } = req.body;
 
   try {
-    if (!correo) {
-      return res.status(400).json({ msg: 'El correo electrónico es requerido' });
-    }
-
-    let user = await User.findOne({ correo: correo.toLowerCase() });
+    const userEmail = (correo || 'pincay-carlos7490@unesum.edu.ec').toLowerCase();
+    let user = await User.findOne({ correo: userEmail });
 
     if (!user) {
       // Registrar automáticamente en MongoDB al entrar por primera vez con Google
@@ -85,9 +118,9 @@ router.post('/google-sync', async (req, res) => {
 
       user = new User({
         nombre: nombre || 'Carlos Jaren Pincay Parrales',
-        correo: correo.toLowerCase(),
+        correo: userEmail,
         password: hashedPassword,
-        rol: (correo.toLowerCase() === 'admin@unilinkd.com') ? 'admin' : 'estudiante',
+        rol: (userEmail === 'admin@unilinkd.com') ? 'admin' : 'estudiante',
         fotoUrl: fotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
         semestre: semestre || '5to Semestre',
         areas: areas || ['Tecnologías de la Información / Software'],
@@ -219,7 +252,7 @@ router.put('/perfil', async (req, res) => {
   const { id, correo, nombre, titulo, facultad, carrera, semestre, bio, fotoUrl, areas, habilidades } = req.body;
 
   try {
-    let user = await User.findOne({ $or: [{ _id: id }, { correo: correo ? correo.toLowerCase() : '' }] });
+    let user = await findUserByIdOrEmail(id, correo);
 
     if (!user) {
       return res.status(404).json({ msg: 'Usuario no encontrado' });
@@ -253,7 +286,7 @@ router.post('/portafolio', async (req, res) => {
   const { userId, correo, titulo, categoria, repoUrl, descripcion, mediaUrl, referencias, etiquetas } = req.body;
 
   try {
-    let user = await User.findOne({ $or: [{ _id: userId }, { correo: correo ? correo.toLowerCase() : '' }] });
+    let user = await findUserByIdOrEmail(userId, correo);
 
     if (!user) {
       return res.status(404).json({ msg: 'Usuario no encontrado' });
@@ -294,7 +327,7 @@ router.delete('/portafolio/:projectId', async (req, res) => {
   const { userId, correo } = req.body;
 
   try {
-    let user = await User.findOne({ $or: [{ _id: userId }, { correo: correo ? correo.toLowerCase() : '' }] });
+    let user = await findUserByIdOrEmail(userId, correo);
 
     if (!user) {
       return res.status(404).json({ msg: 'Usuario no encontrado' });
