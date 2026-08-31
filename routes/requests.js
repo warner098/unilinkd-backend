@@ -170,7 +170,7 @@ router.put('/:id/status', async (req, res) => {
 router.post('/:id/messages', async (req, res) => {
   try {
     const { id } = req.params;
-    const { emisorId, emisorNombre, emisorFoto, mensaje, mediaUrl } = req.body;
+    const { emisorId, emisorNombre, emisorFoto, mensaje, mediaUrl, nombreArchivo, tamanoArchivo } = req.body;
 
     const helpReq = await HelpRequest.findById(id);
     if (!helpReq) return res.status(404).json({ msg: 'Petición no encontrada' });
@@ -185,6 +185,8 @@ router.post('/:id/messages', async (req, res) => {
       emisorFoto: emisorFoto || '',
       mensaje: mensaje || '',
       mediaUrl: mediaUrl || '',
+      nombreArchivo: nombreArchivo || '',
+      tamanoArchivo: tamanoArchivo || '',
       fecha: new Date()
     };
 
@@ -200,11 +202,15 @@ router.post('/:id/messages', async (req, res) => {
       const destinatarioId = isEmisorAutor ? helpReq.solicitanteId : helpReq.autorServicioId;
       const destinatarioNombre = isEmisorAutor ? helpReq.solicitanteNombre : helpReq.autorServicioNombre;
 
+      const notifPreviewText = mensaje 
+        ? (mensaje.length > 50 ? mensaje.substring(0, 50) + '...' : mensaje)
+        : (nombreArchivo ? `Ha enviado un archivo: ${nombreArchivo}` : 'Ha enviado un archivo adjunto');
+
       const newNotif = new Notification({
         usuarioId: destinatarioId,
         usuarioNombre: destinatarioNombre,
         titulo: `💬 Nuevo mensaje de ${emisorNombre}`,
-        mensaje: `${emisorNombre}: "${mensaje ? (mensaje.length > 50 ? mensaje.substring(0, 50) + '...' : mensaje) : 'Ha enviado una imagen'}"`,
+        mensaje: `${emisorNombre}: "${notifPreviewText}"`,
         tipo: 'info',
         requestId: helpReq._id.toString()
       });

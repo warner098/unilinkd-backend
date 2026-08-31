@@ -6,6 +6,8 @@ const messageSchema = new mongoose.Schema({
   emisorFoto: { type: String, default: '' },
   mensaje: { type: String, default: '' },
   mediaUrl: { type: String, default: '' },
+  nombreArchivo: { type: String, default: '' },
+  tamanoArchivo: { type: String, default: '' },
   fecha: { type: Date, default: Date.now }
 });
 
