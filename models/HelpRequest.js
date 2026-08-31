@@ -27,6 +27,12 @@ const helpRequestSchema = new mongoose.Schema({
   mediaUrl: { type: String, default: '' },
   referencias: { type: String, default: '' },
 
+  tipoPeticion: {
+    type: String,
+    enum: ['servicio', 'proyecto'],
+    default: 'servicio'
+  },
+
   estado: {
     type: String,
     enum: ['pendiente', 'aceptado', 'rechazado'],

@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const HelpRequest = require('../models/HelpRequest');
 const Notification = require('../models/Notification');
+const Project = require('../models/Project');
 
-// 1. CREAR UNA NUEVA PETICIÓN DE AYUDA
+// 1. CREAR UNA NUEVA PETICIÓN DE AYUDA O SOLICITUD DE COLABORACIÓN EN PROYECTO
 router.post('/', async (req, res) => {
   try {
     const {
@@ -18,7 +19,8 @@ router.post('/', async (req, res) => {
       tituloPeticion,
       descripcion,
       mediaUrl,
-      referencias
+      referencias,
+      tipoPeticion
     } = req.body;
 
     if (!servicioId || !autorServicioId || !solicitanteId || !tituloPeticion || !descripcion) {
@@ -27,7 +29,7 @@ router.post('/', async (req, res) => {
 
     const newRequest = new HelpRequest({
       servicioId,
-      servicioTitulo: servicioTitulo || 'Servicio Universitario',
+      servicioTitulo: servicioTitulo || 'Servicio o Proyecto Universitario',
       autorServicioId,
       autorServicioNombre: autorServicioNombre || 'Estudiante',
       autorServicioFoto: autorServicioFoto || '',
@@ -38,19 +40,23 @@ router.post('/', async (req, res) => {
       descripcion,
       mediaUrl: mediaUrl || '',
       referencias: referencias || '',
+      tipoPeticion: tipoPeticion || 'servicio',
       estado: 'pendiente',
       mensajes: []
     });
 
     await newRequest.save();
 
-    // Notificar al dueño del servicio en tiempo real
+    // Notificar al dueño del servicio o proyecto en tiempo real
     try {
+      const isProyecto = (tipoPeticion === 'proyecto');
       const newNotification = new Notification({
         usuarioId: autorServicioId,
         usuarioNombre: autorServicioNombre || 'Estudiante',
-        titulo: '📩 Nueva petición de ayuda recibida',
-        mensaje: `${solicitanteNombre || 'Un estudiante'} te ha enviado una propuesta de ayuda para tu servicio "${servicioTitulo}": "${tituloPeticion}".`,
+        titulo: isProyecto ? '🚀 Nueva propuesta de colaboración recibida' : '📩 Nueva petición de ayuda recibida',
+        mensaje: isProyecto
+          ? `${solicitanteNombre || 'Un estudiante'} desea unirse a tu proyecto "${servicioTitulo}". Propuesta: "${tituloPeticion}".`
+          : `${solicitanteNombre || 'Un estudiante'} te ha enviado una propuesta de ayuda para tu servicio "${servicioTitulo}": "${tituloPeticion}".`,
         tipo: 'peticion_recibida',
         requestId: newRequest._id.toString()
       });
@@ -62,7 +68,7 @@ router.post('/', async (req, res) => {
     res.status(201).json(newRequest);
   } catch (err) {
     console.error('Error al crear petición de ayuda:', err);
-    res.status(500).json({ msg: 'Error en el servidor al enviar la petición de ayuda: ' + err.message });
+    res.status(500).json({ msg: 'Error en el servidor al enviar la petición: ' + err.message });
   }
 });
 
@@ -121,7 +127,7 @@ router.put('/:id/status', async (req, res) => {
     const { estado, motivoRechazo, userId, userNombre } = req.body;
 
     const helpReq = await HelpRequest.findById(id);
-    if (!helpReq) return res.status(404).json({ msg: 'Petición de ayuda no encontrada' });
+    if (!helpReq) return res.status(404).json({ msg: 'Petición no encontrada' });
 
     // Verificar autorización por ID o por Nombre
     const isOwnerById = helpReq.autorServicioId && userId && helpReq.autorServicioId.toString() === userId.toString();
@@ -134,22 +140,35 @@ router.put('/:id/status', async (req, res) => {
       }
     }
 
+    const prevEstado = helpReq.estado;
     helpReq.estado = estado;
     if (motivoRechazo) helpReq.motivoRechazo = motivoRechazo;
     helpReq.updatedAt = Date.now();
 
     await helpReq.save();
 
+    // Si es una petición de proyecto y recién se acepta, incrementar colaboradoresUnidos del proyecto en MongoDB
+    if (estado === 'aceptado' && prevEstado !== 'aceptado' && helpReq.tipoPeticion === 'proyecto' && helpReq.servicioId) {
+      try {
+        await Project.findByIdAndUpdate(helpReq.servicioId, { $inc: { colaboradoresUnidos: 1 } });
+      } catch (pErr) {
+        console.error('Error al incrementar colaboradores del proyecto:', pErr.message);
+      }
+    }
+
     // Notificar al solicitante
     try {
+      const isProyecto = (helpReq.tipoPeticion === 'proyecto');
       const notifMsg = estado === 'aceptado'
-        ? `🎉 Tu propuesta "${helpReq.tituloPeticion}" para "${helpReq.servicioTitulo}" fue ACEPTADA por ${helpReq.autorServicioNombre}. ¡El chat en vivo está listo!`
+        ? (isProyecto 
+            ? `🎉 ¡Felicidades! Tu solicitud para unirte al proyecto "${helpReq.servicioTitulo}" fue ACEPTADA por ${helpReq.autorServicioNombre}. ¡El chat del proyecto está activo!`
+            : `🎉 Tu propuesta "${helpReq.tituloPeticion}" para "${helpReq.servicioTitulo}" fue ACEPTADA por ${helpReq.autorServicioNombre}. ¡El chat en vivo está listo!`)
         : `⚠️ Tu propuesta "${helpReq.tituloPeticion}" fue rechazada. Motivo: ${motivoRechazo || 'Información no adecuada'}`;
 
       const newNotification = new Notification({
         usuarioId: helpReq.solicitanteId,
         usuarioNombre: helpReq.solicitanteNombre,
-        titulo: estado === 'aceptado' ? '✅ Petición Aceptada - Chat Activo' : '❌ Petición Rechazada',
+        titulo: estado === 'aceptado' ? (isProyecto ? '🎉 Solicitud de Proyecto Aceptada' : '✅ Petición Aceptada - Chat Activo') : '❌ Petición Rechazada',
         mensaje: notifMsg,
         tipo: estado === 'aceptado' ? 'peticion_aceptada' : 'peticion_rechazada',
         requestId: helpReq._id.toString()

@@ -26,6 +26,10 @@ const ProjectSchema = new mongoose.Schema({
     type: String,
     default: 'Colaboradores'
   },
+  colaboradoresUnidos: {
+    type: Number,
+    default: 0
+  },
   categoriaPrincipal: {
     type: String,
     required: true,
