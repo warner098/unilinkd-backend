@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 
 // Helper para formatear objeto de usuario devuelto al cliente
@@ -19,6 +20,39 @@ const formatUserResponse = (user) => ({
   areas: user.areas,
   habilidades: user.habilidades,
   portafolio: user.portafolio || []
+});
+
+// @route   GET /api/auth/usuario/:identifier
+// @desc    Obtener el perfil público de un usuario por su ID, Nombre o Correo
+router.get('/usuario/:identifier', async (req, res) => {
+  try {
+    const { identifier } = req.params;
+    let user;
+
+    if (mongoose.Types.ObjectId.isValid(identifier)) {
+      user = await User.findById(identifier);
+    }
+
+    if (!user) {
+      const decodedName = decodeURIComponent(identifier).trim();
+      const escapedName = decodedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      user = await User.findOne({
+        $or: [
+          { nombre: new RegExp(`^${escapedName}$`, 'i') },
+          { correo: decodedName.toLowerCase() }
+        ]
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+
+    res.json(formatUserResponse(user));
+  } catch (err) {
+    console.error('Error al obtener usuario por identificador:', err);
+    res.status(500).send('Error al obtener perfil del usuario');
+  }
 });
 
 // @route   POST /api/auth/register
