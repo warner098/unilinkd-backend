@@ -4,6 +4,23 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+// Helper para formatear objeto de usuario devuelto al cliente
+const formatUserResponse = (user) => ({
+  id: user.id || user._id,
+  nombre: user.nombre,
+  correo: user.correo,
+  rol: user.rol,
+  titulo: user.titulo,
+  facultad: user.facultad,
+  carrera: user.carrera,
+  semestre: user.semestre,
+  bio: user.bio,
+  fotoUrl: user.fotoUrl,
+  areas: user.areas,
+  habilidades: user.habilidades,
+  portafolio: user.portafolio || []
+});
+
 // @route   POST /api/auth/register
 // @desc    Registrar nuevo usuario
 router.post('/register', async (req, res) => {
@@ -24,7 +41,8 @@ router.post('/register', async (req, res) => {
       password,
       rol,
       areas,
-      semestre
+      semestre,
+      portafolio: []
     });
 
     const salt = await bcrypt.genSalt(10);
@@ -47,20 +65,7 @@ router.post('/register', async (req, res) => {
         if (err) throw err;
         res.json({
           token,
-          user: {
-            id: user.id,
-            nombre: user.nombre,
-            correo: user.correo,
-            rol: user.rol,
-            titulo: user.titulo,
-            facultad: user.facultad,
-            carrera: user.carrera,
-            semestre: user.semestre,
-            bio: user.bio,
-            fotoUrl: user.fotoUrl,
-            areas: user.areas,
-            habilidades: user.habilidades
-          }
+          user: formatUserResponse(user)
         });
       }
     );
@@ -108,20 +113,7 @@ router.post('/login', async (req, res) => {
         if (err) throw err;
         res.json({
           token,
-          user: {
-            id: user.id,
-            nombre: user.nombre,
-            correo: user.correo,
-            rol: user.rol,
-            titulo: user.titulo,
-            facultad: user.facultad,
-            carrera: user.carrera,
-            semestre: user.semestre,
-            bio: user.bio,
-            fotoUrl: user.fotoUrl,
-            areas: user.areas,
-            habilidades: user.habilidades
-          }
+          user: formatUserResponse(user)
         });
       }
     );
@@ -158,24 +150,80 @@ router.put('/perfil', async (req, res) => {
 
     res.json({
       msg: 'Perfil actualizado con éxito',
-      user: {
-        id: user.id,
-        nombre: user.nombre,
-        correo: user.correo,
-        rol: user.rol,
-        titulo: user.titulo,
-        facultad: user.facultad,
-        carrera: user.carrera,
-        semestre: user.semestre,
-        bio: user.bio,
-        fotoUrl: user.fotoUrl,
-        areas: user.areas,
-        habilidades: user.habilidades
-      }
+      user: formatUserResponse(user)
     });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Error al actualizar el perfil en el servidor');
+  }
+});
+
+// @route   POST /api/auth/portafolio
+// @desc    Agregar un proyecto al portafolio del usuario
+router.post('/portafolio', async (req, res) => {
+  const { userId, correo, titulo, categoria, repoUrl, descripcion, mediaUrl, referencias, etiquetas } = req.body;
+
+  try {
+    let user = await User.findOne({ $or: [{ _id: userId }, { correo: correo ? correo.toLowerCase() : '' }] });
+
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+
+    const nuevoProyecto = {
+      id: 'port_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      titulo,
+      categoria,
+      repoUrl: repoUrl || '',
+      descripcion,
+      mediaUrl: mediaUrl || '',
+      referencias: referencias || '',
+      etiquetas: etiquetas || [],
+      fecha: new Date()
+    };
+
+    if (!user.portafolio) user.portafolio = [];
+    user.portafolio.unshift(nuevoProyecto);
+
+    await user.save();
+
+    res.json({
+      msg: 'Proyecto agregado al portafolio con éxito',
+      user: formatUserResponse(user),
+      proyecto: nuevoProyecto
+    });
+  } catch (err) {
+    console.error('Error al agregar proyecto al portafolio:', err);
+    res.status(500).send('Error al guardar el proyecto en el portafolio');
+  }
+});
+
+// @route   DELETE /api/auth/portafolio/:projectId
+// @desc    Eliminar un proyecto del portafolio del usuario
+router.delete('/portafolio/:projectId', async (req, res) => {
+  const { projectId } = req.params;
+  const { userId, correo } = req.body;
+
+  try {
+    let user = await User.findOne({ $or: [{ _id: userId }, { correo: correo ? correo.toLowerCase() : '' }] });
+
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+
+    user.portafolio = (user.portafolio || []).filter(
+      (p) => (p.id || p._id?.toString()) !== projectId
+    );
+
+    await user.save();
+
+    res.json({
+      msg: 'Proyecto eliminado del portafolio con éxito',
+      user: formatUserResponse(user)
+    });
+  } catch (err) {
+    console.error('Error al eliminar proyecto del portafolio:', err);
+    res.status(500).send('Error al eliminar el proyecto del portafolio');
   }
 });
 

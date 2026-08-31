@@ -1,5 +1,45 @@
 const mongoose = require('mongoose');
 
+const PortfolioProjectSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    default: () => new mongoose.Types.ObjectId().toString()
+  },
+  titulo: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  categoria: {
+    type: String,
+    required: true
+  },
+  repoUrl: {
+    type: String,
+    default: ''
+  },
+  descripcion: {
+    type: String,
+    required: true
+  },
+  mediaUrl: {
+    type: String,
+    default: ''
+  },
+  referencias: {
+    type: String,
+    default: ''
+  },
+  etiquetas: {
+    type: [String],
+    default: []
+  },
+  fecha: {
+    type: Date,
+    default: Date.now
+  }
+});
+
 const UserSchema = new mongoose.Schema({
   nombre: {
     type: String,
@@ -45,6 +85,11 @@ const UserSchema = new mongoose.Schema({
   },
   habilidades: {
     type: [String],
+    default: []
+  },
+  // --- Portafolio Personal del Usuario ---
+  portafolio: {
+    type: [PortfolioProjectSchema],
     default: []
   },
   // ---------------------------------------------
