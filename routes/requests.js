@@ -1,8 +1,29 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const HelpRequest = require('../models/HelpRequest');
 const Notification = require('../models/Notification');
 const Project = require('../models/Project');
+const User = require('../models/User');
+
+// Helper para encontrar datos actualizados del usuario por ID o Nombre
+const findUserByIdOrName = async (id, nombre) => {
+  let user = null;
+  if (id && mongoose.Types.ObjectId.isValid(id) && id.toString().length === 24) {
+    user = await User.findById(id);
+  }
+  if (!user && nombre) {
+    const escaped = nombre.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    user = await User.findOne({
+      $or: [
+        { googleId: id ? id.toString() : '' },
+        { nombre: new RegExp(`^${escaped}$`, 'i') },
+        { nombre: new RegExp(escaped, 'i') }
+      ]
+    });
+  }
+  return user;
+};
 
 // 1. CREAR UNA NUEVA PETICIÓN DE AYUDA O SOLICITUD DE COLABORACIÓN EN PROYECTO
 router.post('/', async (req, res) => {
@@ -96,7 +117,7 @@ router.get('/user/:userId', async (req, res) => {
 
     const allRequests = await HelpRequest.find(query).sort({ updatedAt: -1 });
 
-    // Filtrar solicitudes eliminadas por cada rol individualmente
+    // Poblar en tiempo real los datos actualizados de autor y solicitante desde User
     const cleanUserId = userId.toString();
     const cleanUserName = userNombre ? userNombre.trim().toLowerCase() : '';
 
@@ -113,7 +134,36 @@ router.get('/user/:userId', async (req, res) => {
       return true;
     });
 
-    res.json(filtered);
+    // Enriquecer cada peticion con el nombre y la foto mas reciente del usuario
+    const populated = await Promise.all(
+      filtered.map(async (r) => {
+        const reqObj = r.toObject();
+
+        try {
+          if (reqObj.autorServicioId || reqObj.autorServicioNombre) {
+            const autorUser = await findUserByIdOrName(reqObj.autorServicioId, reqObj.autorServicioNombre);
+            if (autorUser) {
+              reqObj.autorServicioNombre = autorUser.nombre || reqObj.autorServicioNombre;
+              if (autorUser.fotoUrl) reqObj.autorServicioFoto = autorUser.fotoUrl;
+            }
+          }
+
+          if (reqObj.solicitanteId || reqObj.solicitanteNombre) {
+            const solicitanteUser = await findUserByIdOrName(reqObj.solicitanteId, reqObj.solicitanteNombre);
+            if (solicitanteUser) {
+              reqObj.solicitanteNombre = solicitanteUser.nombre || reqObj.solicitanteNombre;
+              if (solicitanteUser.fotoUrl) reqObj.solicitanteFoto = solicitanteUser.fotoUrl;
+            }
+          }
+        } catch (popErr) {
+          console.error('Error enriqueciendo datos de usuario:', popErr.message);
+        }
+
+        return reqObj;
+      })
+    );
+
+    res.json(populated);
   } catch (err) {
     console.error('Error al consultar peticiones:', err);
     res.status(500).json({ msg: 'Error al consultar peticiones de ayuda' });
